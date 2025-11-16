@@ -1,0 +1,194 @@
+name: Blue-Green Deployment Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  DOCKER_IMAGE: sports-portal
+  DOCKER_TAG: ${{ github.sha }}
+
+jobs:
+  # Job 1: Build y Test
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout código
+      uses: actions/checkout@v3
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Instalar dependencias
+      run: npm ci
+    
+    - name: Ejecutar linter
+      run: npm run lint
+    
+    - name: Build de la aplicación
+      run: npm run build
+    
+    - name: Verificar build artifacts
+      run: |
+        if [ ! -d "dist" ]; then
+          echo "Error: El directorio dist no fue creado"
+          exit 1
+        fi
+        echo "Build completado exitosamente"
+    
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: dist
+        path: dist/
+        retention-days: 1
+
+  # Job 2: Build Docker Image
+  build-docker:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout código
+      uses: actions/checkout@v3
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+    
+    - name: Login to Docker Hub (opcional)
+      if: github.event_name != 'pull_request'
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    - name: Build Docker image
+      run: |
+        docker build -t ${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }} .
+        docker tag ${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }} ${{ env.DOCKER_IMAGE }}:latest
+    
+    - name: Test Docker image
+      run: |
+        docker run -d -p 8080:80 --name test-container ${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}
+        sleep 10
+        curl -f http://localhost:8080/health || exit 1
+        docker stop test-container
+        docker rm test-container
+    
+    - name: Save Docker image
+      run: |
+        docker save ${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }} | gzip > image.tar.gz
+    
+    - name: Upload Docker image artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: docker-image
+        path: image.tar.gz
+        retention-days: 1
+
+  # Job 3: Deploy to Green Environment
+  deploy-green:
+    needs: build-docker
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+    - name: Checkout código
+      uses: actions/checkout@v3
+    
+    - name: Download Docker image
+      uses: actions/download-artifact@v3
+      with:
+        name: docker-image
+    
+    - name: Load Docker image
+      run: |
+        docker load < image.tar.gz
+    
+    - name: Deploy to Green environment
+      run: |
+        echo "Desplegando a ambiente Green..."
+        # Aquí irían los comandos para desplegar en tu servidor
+        # Por ejemplo, usando SSH:
+        # ssh user@server 'bash -s' < deploy-green.sh
+        
+        # Para ambiente local/test:
+        docker-compose up -d app-green
+        
+        echo "Esperando que Green esté listo..."
+        sleep 15
+    
+    - name: Health check Green
+      run: |
+        for i in {1..30}; do
+          if curl -f http://localhost:8082/health; then
+            echo "Green environment is healthy"
+            exit 0
+          fi
+          echo "Attempt $i failed, retrying..."
+          sleep 2
+        done
+        echo "Green environment failed health check"
+        exit 1
+    
+    - name: Notificar despliegue exitoso
+      if: success()
+      run: |
+        echo "✓ Nueva versión desplegada en Green"
+        echo "Para cambiar a producción, ejecuta el switch manual"
+
+  # Job 4: Switch to Production (Manual)
+  switch-to-production:
+    needs: deploy-green
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    environment:
+      name: production
+      url: http://your-domain.com
+    
+    steps:
+    - name: Checkout código
+      uses: actions/checkout@v3
+    
+    - name: Switch to Green
+      run: |
+        echo "Cambiando producción a Green..."
+        # Ejecutar script de switch
+        bash switch-environment.sh green
+    
+    - name: Verify production
+      run: |
+        curl -f http://localhost/ || exit 1
+        echo "✓ Producción actualizada exitosamente"
+    
+    - name: Keep Blue as backup
+      run: |
+        echo "Blue environment mantenido como backup para rollback"
+
+  # Job 5: Rollback (Manual)
+  rollback:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    environment:
+      name: production-rollback
+    
+    steps:
+    - name: Checkout código
+      uses: actions/checkout@v3
+    
+    - name: Rollback to Blue
+      run: |
+        echo "Ejecutando rollback a Blue..."
+        bash switch-environment.sh blue
+    
+    - name: Verify rollback
+      run: |
+        curl -f http://localhost/ || exit 1
+        echo "✓ Rollback completado exitosamente"

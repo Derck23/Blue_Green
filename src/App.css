@@ -1,42 +1,203 @@
-#root {
-  max-width: 1280px;
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 2rem;
+  text-align: center;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 2.5rem;
+  font-weight: bold;
+}
+
+.version {
+  margin: 0.5rem 0 0 0;
+  font-size: 0.9rem;
+  opacity: 0.9;
+}
+
+.main-content {
+  flex: 1;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 2rem;
+  width: 100%;
+}
+
+.intro {
+  text-align: center;
+  margin-bottom: 3rem;
+}
+
+.intro h2 {
+  color: #667eea;
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+}
+
+.intro p {
+  color: #666;
+  font-size: 1.1rem;
+}
+
+.sports-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.sport-card {
+  background: white;
+  border: 2px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 1.5rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
   text-align: center;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
+.sport-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 8px 16px rgba(102, 126, 234, 0.2);
+  border-color: #667eea;
 }
 
-@keyframes logo-spin {
+.sport-card.selected {
+  border-color: #667eea;
+  background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+}
+
+.sport-icon {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+}
+
+.sport-card h3 {
+  color: #333;
+  margin: 0.5rem 0;
+  font-size: 1.5rem;
+}
+
+.sport-card p {
+  color: #666;
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.sport-details {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 12px;
+  padding: 2rem;
+  margin-top: 2rem;
+  animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
   from {
-    transform: rotate(0deg);
+    opacity: 0;
+    transform: translateY(-20px);
   }
   to {
-    transform: rotate(360deg);
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
+.sport-details h2 {
+  margin-top: 0;
+  font-size: 2rem;
+}
+
+.detail-description {
+  font-size: 1.1rem;
+  margin-bottom: 1.5rem;
+}
+
+.sport-details h3 {
+  margin-top: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.sport-details ul {
+  list-style: none;
+  padding: 0;
+}
+
+.sport-details li {
+  padding: 0.5rem 0;
+  padding-left: 1.5rem;
+  position: relative;
+}
+
+.sport-details li:before {
+  content: "✓";
+  position: absolute;
+  left: 0;
+  font-weight: bold;
+}
+
+.close-btn {
+  background: white;
+  color: #667eea;
+  border: none;
+  padding: 0.75rem 2rem;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: bold;
+  cursor: pointer;
+  margin-top: 1rem;
+  transition: all 0.3s ease;
+}
+
+.close-btn:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.footer {
+  background: #2d3748;
+  color: white;
+  padding: 1.5rem;
+  text-align: center;
+  margin-top: auto;
+}
+
+.footer p {
+  margin: 0.25rem 0;
+}
+
+.env-info {
+  font-weight: bold;
+}
+
+.env-blue {
+  color: #4299e1;
+  font-size: 1.1rem;
+  padding: 0.25rem 0.5rem;
+  background: rgba(66, 153, 225, 0.2);
+  border-radius: 4px;
+}
+
+@media (max-width: 768px) {
+  .header h1 {
+    font-size: 1.8rem;
   }
-}
-
-.card {
-  padding: 2em;
-}
-
-.read-the-docs {
-  color: #888;
+  
+  .sports-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .main-content {
+    padding: 1rem;
+  }
 }
