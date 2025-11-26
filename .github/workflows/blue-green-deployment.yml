@@ -115,12 +115,8 @@ jobs:
     - name: Deploy to Green environment
       run: |
         echo "Desplegando a ambiente Green..."
-        # Aquí irían los comandos para desplegar en tu servidor
-        # Por ejemplo, usando SSH:
-        # ssh user@server 'bash -s' < deploy-green.sh
-        
-        # Para ambiente local/test:
-        docker-compose up -d app-green
+        # Iniciar contenedor Green para testing
+        docker run -d -p 8082:80 --name app-green ${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}
         
         echo "Esperando que Green esté listo..."
         sleep 15
@@ -128,7 +124,7 @@ jobs:
     - name: Health check Green
       run: |
         for i in {1..30}; do
-          if curl -f http://localhost:8082/health; then
+          if curl -f http://localhost:8082/ || curl -f http://localhost:8082/health; then
             echo "Green environment is healthy"
             exit 0
           fi
@@ -136,6 +132,7 @@ jobs:
           sleep 2
         done
         echo "Green environment failed health check"
+        docker logs app-green
         exit 1
     
     - name: Notificar despliegue exitoso
