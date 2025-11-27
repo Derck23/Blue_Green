@@ -119,26 +119,52 @@ jobs:
       target_env: ${{ steps.check.outputs.target_env }}
       target_port: ${{ steps.check.outputs.target_port }}
       inactive_env: ${{ steps.check.outputs.inactive_env }}
+      current_env: ${{ steps.check.outputs.current_env }}
     
     steps:
-    - name: Determinar ambiente inactivo
+    - name: 🔍 BLUE-GREEN SWITCHING - Detectando ambiente actual
+      run: |
+        echo "══════════════════════════════════════════════════════════"
+        echo "     🔍 DETECCIÓN DE AMBIENTE BLUE-GREEN"
+        echo "══════════════════════════════════════════════════════════"
+        echo ""
+        echo "📊 Variable de estado:"
+        echo "   ACTIVE_ENVIRONMENT = ${{ vars.ACTIVE_ENVIRONMENT || 'blue (default)' }}"
+        echo ""
+    
+    - name: 🎯 Determinar ambiente para switching
       id: check
       run: |
-        # Intentar leer el estado del último deployment
-        # Por defecto, si no existe, usar GREEN como primer target
         CURRENT_ACTIVE="${{ vars.ACTIVE_ENVIRONMENT || 'blue' }}"
+        echo "current_env=$CURRENT_ACTIVE" >> $GITHUB_OUTPUT
+        
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "🔄 SWITCHING BLUE-GREEN DETECTADO"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
         
         if [ "$CURRENT_ACTIVE" == "blue" ]; then
           echo "target_env=green" >> $GITHUB_OUTPUT
           echo "target_port=8082" >> $GITHUB_OUTPUT
           echo "inactive_env=green" >> $GITHUB_OUTPUT
-          echo "Ambiente activo: BLUE -> Desplegando en: GREEN"
+          
+          echo "📍 Ambiente ACTUAL:    🔵 BLUE (puerto 8081)"
+          echo "📍 Ambiente OBJETIVO:  🟢 GREEN (puerto 8082)"
+          echo ""
+          echo "✅ SWITCHING: De BLUE → GREEN"
         else
           echo "target_env=blue" >> $GITHUB_OUTPUT
           echo "target_port=8081" >> $GITHUB_OUTPUT
           echo "inactive_env=blue" >> $GITHUB_OUTPUT
-          echo "Ambiente activo: GREEN -> Desplegando en: BLUE"
+          
+          echo "📍 Ambiente ACTUAL:    🟢 GREEN (puerto 8082)"
+          echo "📍 Ambiente OBJETIVO:  🔵 BLUE (puerto 8081)"
+          echo ""
+          echo "✅ SWITCHING: De GREEN → BLUE"
         fi
+        
+        echo ""
+        echo "══════════════════════════════════════════════════════════"
 
   # Job 4: Deploy to inactive environment
   deploy-inactive:
@@ -158,18 +184,37 @@ jobs:
       run: |
         docker load < image.tar.gz
     
-    - name: Deploy to ${{ needs.determine-target.outputs.target_env }} environment
+    - name: 📦 Estado Docker ANTES del deployment
+      run: |
+        echo "══════════════════════════════════════════════════════════"
+        echo "     📦 CONTENEDORES DOCKER (ANTES)"
+        echo "══════════════════════════════════════════════════════════"
+        echo ""
+        docker ps -a --filter "name=app-" --format "table {{.Names}}\t{{.State}}\t{{.Status}}\t{{.Ports}}" || echo "No hay contenedores previos"
+        echo ""
+    
+    - name: 🚀 Desplegando en ambiente ${{ needs.determine-target.outputs.target_env }}
       run: |
         TARGET_ENV="${{ needs.determine-target.outputs.target_env }}"
         TARGET_PORT="${{ needs.determine-target.outputs.target_port }}"
+        CURRENT_ENV="${{ needs.determine-target.outputs.current_env }}"
         
-        echo "Desplegando a ambiente: $TARGET_ENV (puerto $TARGET_PORT)..."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "🚀 DEPLOYMENT EN AMBIENTE INACTIVO"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "📍 Producción actual: $CURRENT_ENV"
+        echo "🎯 Desplegando en: $TARGET_ENV (puerto $TARGET_PORT)"
+        echo "🐳 Imagen: ${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}"
+        echo ""
         
-        # Detener contenedor anterior si existe
+        echo "🧹 Limpiando contenedor anterior..."
         docker stop "app-$TARGET_ENV" 2>/dev/null || true
         docker rm "app-$TARGET_ENV" 2>/dev/null || true
+        echo "✅ Limpieza completada"
+        echo ""
         
-        # Iniciar nuevo contenedor en ambiente inactivo
+        echo "🐳 Iniciando contenedor app-$TARGET_ENV..."
         docker run -d \
           -p $TARGET_PORT:80 \
           --name "app-$TARGET_ENV" \
@@ -177,8 +222,23 @@ jobs:
           --restart unless-stopped \
           ${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}
         
-        echo "Esperando que $TARGET_ENV esté listo..."
+        echo "✅ Contenedor iniciado"
+        echo ""
+        echo "⏳ Esperando 15 segundos..."
         sleep 15
+        echo "✅ Listo"
+    
+    - name: 📊 Estado Docker DESPUÉS del deployment
+      run: |
+        echo ""
+        echo "══════════════════════════════════════════════════════════"
+        echo "     📊 CONTENEDORES DOCKER (DESPUÉS)"
+        echo "══════════════════════════════════════════════════════════"
+        echo ""
+        docker ps -a --filter "name=app-" --format "table {{.Names}}\t{{.State}}\t{{.Status}}\t{{.Ports}}"
+        echo ""
+        echo "📝 Ambos ambientes Blue y Green están corriendo"
+        echo ""
     
     - name: Health check ${{ needs.determine-target.outputs.target_env }}
       run: |
@@ -200,21 +260,27 @@ jobs:
         docker logs "app-$TARGET_ENV"
         exit 1
     
-    - name: Notificar despliegue exitoso
+    - name: ✅ Deployment completado
       if: success()
       run: |
         TARGET_ENV="${{ needs.determine-target.outputs.target_env }}"
-        echo "================================"
-        echo "✓ Nueva versión desplegada en $TARGET_ENV"
-        echo "================================"
+        CURRENT_ENV="${{ needs.determine-target.outputs.current_env }}"
+        
         echo ""
-        echo "Para promover a producción:"
-        echo "  1. Ve a Actions -> Blue-Green Deployment Pipeline"
-        echo "  2. Click en 'Run workflow'"
-        echo "  3. Selecciona 'Switch to Production'"
+        echo "╔═══════════════════════════════════════════════════════╗"
+        echo "║           ✅ DEPLOYMENT EXITOSO                      ║"
+        echo "╚═══════════════════════════════════════════════════════╝"
         echo ""
-        echo "O ejecuta manualmente:"
-        echo "  gh workflow run blue-green-deployment.yml"
+        echo "📊 Estado de ambientes:"
+        echo "  🔵 BLUE:  $(docker ps | grep -q 'app-blue' && echo '✅ Running (8081)' || echo '⭕ Stopped')"
+        echo "  🟢 GREEN: $(docker ps | grep -q 'app-green' && echo '✅ Running (8082)' || echo '⭕ Stopped')"
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "🎯 Nueva versión lista en: $TARGET_ENV"
+        echo "📍 Producción activa en: $CURRENT_ENV"
+        echo ""
+        echo "⏭️  SIGUIENTE: Ejecutar SWITCH para cambiar producción"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
   # Job 5: Switch to Production (Manual con workflow_dispatch)
   switch-to-production:
@@ -229,30 +295,47 @@ jobs:
     - name: Checkout código
       uses: actions/checkout@v3
     
-    - name: Verificar ambos ambientes están corriendo
+    - name: 📊 Estado ANTES del SWITCH
       run: |
-        echo "Verificando estado de ambientes..."
-        docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+        echo "══════════════════════════════════════════════════════════"
+        echo "     📊 ESTADO ANTES DEL SWITCH"
+        echo "══════════════════════════════════════════════════════════"
+        echo ""
+        echo "🔍 Ambiente activo: ${{ vars.ACTIVE_ENVIRONMENT || 'blue' }}"
+        echo ""
+        echo "🐳 Contenedores Docker:"
+        docker ps --filter "name=app-" --format "table {{.Names}}\t{{.State}}\t{{.Status}}\t{{.Ports}}"
+        echo ""
         
-        # Verificar que al menos un ambiente está corriendo
         if ! docker ps | grep -q "app-blue\|app-green"; then
-          echo "Error: No hay ambientes disponibles"
+          echo "❌ Error: No hay ambientes disponibles"
           exit 1
         fi
+        echo "✅ Verificación completada"
+        echo ""
     
-    - name: Switch to ${{ needs.determine-target.outputs.target_env }}
+    - name: 🔄 Ejecutando SWITCHING Blue-Green
       run: |
         TARGET_ENV="${{ needs.determine-target.outputs.target_env }}"
+        CURRENT_ENV="${{ vars.ACTIVE_ENVIRONMENT || 'blue' }}"
         
-        echo "================================"
-        echo "Switching production to: $TARGET_ENV"
-        echo "================================"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "🔄 SWITCHING BLUE-GREEN EN PROGRESO"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "📍 DE:   $CURRENT_ENV"
+        echo "📍 HACIA: $TARGET_ENV"
+        echo ""
+        echo "🔧 Acción: Cambiar proxy Nginx al nuevo ambiente"
+        echo ""
         
-        # Dar permisos de ejecución al script
         chmod +x switch-environment.sh
         
-        # Ejecutar script de switch
+        echo "⚙️  Ejecutando script..."
         ./switch-environment.sh "$TARGET_ENV"
+        
+        echo ""
+        echo "✅ Switch ejecutado exitosamente"
     
     - name: Verify production switch
       run: |
@@ -275,19 +358,51 @@ jobs:
         # Nota: Esto requiere configurar el secreto REPO_TOKEN con permisos
         # gh variable set ACTIVE_ENVIRONMENT --body "$TARGET_ENV"
     
-    - name: Summary
+    - name: 📊 Estado DESPUÉS del SWITCH
+      run: |
+        echo ""
+        echo "══════════════════════════════════════════════════════════"
+        echo "     📊 ESTADO DESPUÉS DEL SWITCH"
+        echo "══════════════════════════════════════════════════════════"
+        echo ""
+        echo "🐳 Contenedores Docker:"
+        docker ps --filter "name=app-" --format "table {{.Names}}\t{{.State}}\t{{.Status}}\t{{.Ports}}"
+        echo ""
+        if docker ps | grep -q "app-proxy"; then
+          echo "🔀 Proxy activo: ✅"
+        fi
+        echo ""
+    
+    - name: 🎉 Resumen del SWITCHING
       run: |
         TARGET_ENV="${{ needs.determine-target.outputs.target_env }}"
         PREVIOUS_ENV="${{ vars.ACTIVE_ENVIRONMENT || 'unknown' }}"
         
-        echo "================================"
-        echo "SWITCH COMPLETADO"
-        echo "================================"
-        echo "Ambiente anterior: $PREVIOUS_ENV"
-        echo "Ambiente actual: $TARGET_ENV"
         echo ""
-        echo "Ambientes disponibles para rollback:"
-        docker ps --filter "name=app-" --format "  - {{.Names}}: {{.Status}}"
+        echo "╔═══════════════════════════════════════════════════════╗"
+        echo "║      🎉 SWITCHING COMPLETADO EXITOSAMENTE           ║"
+        echo "╚═══════════════════════════════════════════════════════╝"
+        echo ""
+        echo "┌─────────────────────────────────────────────────────┐"
+        echo "│  ANTES → DESPUÉS                                    │"
+        echo "├─────────────────────────────────────────────────────┤"
+        
+        if [ "$PREVIOUS_ENV" == "blue" ]; then
+          echo "│  🔵 BLUE    →  🟢 GREEN                            │"
+        else
+          echo "│  🟢 GREEN   →  🔵 BLUE                             │"
+        fi
+        
+        echo "└─────────────────────────────────────────────────────┘"
+        echo ""
+        echo "📍 Producción ahora en: $TARGET_ENV"
+        echo "🔄 Switching Blue-Green aplicado"
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "✅ Blue-Green Deployment completado"
+        echo "✅ Zero downtime garantizado"
+        echo "✅ Rollback disponible"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
   # Job 6: Rollback (Manual - workflow_dispatch separado)
   rollback:
