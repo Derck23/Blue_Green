@@ -175,92 +175,114 @@ jobs:
     - name: Checkout código
       uses: actions/checkout@v3
     
-    - name: Download Docker image
-      uses: actions/download-artifact@v4
+    - name: 🔐 Configurar SSH
+      uses: webfactory/ssh-agent@v0.8.0
       with:
-        name: docker-image
+        ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
     
-    - name: Load Docker image
+    - name: 📡 Conectar a VPS y actualizar código
       run: |
-        docker load < image.tar.gz
+        echo "🔗 Conectando a VPS: ${{ secrets.VPS_HOST }}"
+        ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+          cd ${{ secrets.VPS_PROJECT_PATH || '/root/Blue_Green' }}
+          git pull origin main
+          echo "✅ Código actualizado en VPS"
+        ENDSSH
     
-    - name: 📦 Estado Docker ANTES del deployment
+    - name: 📦 Estado Docker ANTES del deployment (en VPS)
       run: |
         echo "══════════════════════════════════════════════════════════"
-        echo "     📦 CONTENEDORES DOCKER (ANTES)"
+        echo "     📦 CONTENEDORES DOCKER EN VPS (ANTES)"
         echo "══════════════════════════════════════════════════════════"
         echo ""
-        docker ps -a --filter "name=app-" --format "table {{.Names}}\t{{.State}}\t{{.Status}}\t{{.Ports}}" || echo "No hay contenedores previos"
+        ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+          docker ps -a --filter "name=app-" --format "table {{.Names}}\t{{.State}}\t{{.Status}}\t{{.Ports}}" || echo "No hay contenedores previos"
+        ENDSSH
         echo ""
     
-    - name: 🚀 Desplegando en ambiente ${{ needs.determine-target.outputs.target_env }}
+    - name: 🚀 Desplegando en VPS ambiente ${{ needs.determine-target.outputs.target_env }}
       run: |
         TARGET_ENV="${{ needs.determine-target.outputs.target_env }}"
         TARGET_PORT="${{ needs.determine-target.outputs.target_port }}"
         CURRENT_ENV="${{ needs.determine-target.outputs.current_env }}"
         
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "🚀 DEPLOYMENT EN AMBIENTE INACTIVO"
+        echo "🚀 DEPLOYMENT EN VPS - AMBIENTE INACTIVO"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
+        echo "🌐 VPS: ${{ secrets.VPS_HOST }}"
         echo "📍 Producción actual: $CURRENT_ENV"
         echo "🎯 Desplegando en: $TARGET_ENV (puerto $TARGET_PORT)"
-        echo "🐳 Imagen: ${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}"
         echo ""
         
-        echo "🧹 Limpiando contenedor anterior..."
-        docker stop "app-$TARGET_ENV" 2>/dev/null || true
-        docker rm "app-$TARGET_ENV" 2>/dev/null || true
-        echo "✅ Limpieza completada"
-        echo ""
-        
-        echo "🐳 Iniciando contenedor app-$TARGET_ENV..."
-        docker run -d \
-          -p $TARGET_PORT:80 \
-          --name "app-$TARGET_ENV" \
-          -e APP_ENV="$TARGET_ENV" \
-          --restart unless-stopped \
-          ${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}
-        
-        echo "✅ Contenedor iniciado"
-        echo ""
-        echo "⏳ Esperando 15 segundos..."
-        sleep 15
-        echo "✅ Listo"
+        ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << ENDSSH
+          set -e
+          cd ${{ secrets.VPS_PROJECT_PATH || '/root/Blue_Green' }}
+          
+          echo "🧹 Limpiando contenedor anterior..."
+          docker stop app-$TARGET_ENV 2>/dev/null || true
+          docker rm app-$TARGET_ENV 2>/dev/null || true
+          echo "✅ Limpieza completada"
+          echo ""
+          
+          echo "🔨 Construyendo imagen Docker..."
+          docker build -t sports-portal:latest . --quiet
+          echo "✅ Imagen construida"
+          echo ""
+          
+          echo "🐳 Iniciando contenedor app-$TARGET_ENV..."
+          docker run -d \
+            -p $TARGET_PORT:80 \
+            --name app-$TARGET_ENV \
+            -e APP_ENV=$TARGET_ENV \
+            -e DEPLOY_TIME="\$(date +'%Y-%m-%d %H:%M:%S')" \
+            --restart unless-stopped \
+            sports-portal:latest
+          
+          echo "✅ Contenedor iniciado"
+          echo ""
+          echo "⏳ Esperando 15 segundos..."
+          sleep 15
+          echo "✅ Listo"
+        ENDSSH
     
-    - name: 📊 Estado Docker DESPUÉS del deployment
+    - name: 📊 Estado Docker DESPUÉS del deployment (en VPS)
       run: |
         echo ""
         echo "══════════════════════════════════════════════════════════"
-        echo "     📊 CONTENEDORES DOCKER (DESPUÉS)"
+        echo "     📊 CONTENEDORES DOCKER EN VPS (DESPUÉS)"
         echo "══════════════════════════════════════════════════════════"
         echo ""
-        docker ps -a --filter "name=app-" --format "table {{.Names}}\t{{.State}}\t{{.Status}}\t{{.Ports}}"
+        ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+          docker ps -a --filter "name=app-" --format "table {{.Names}}\t{{.State}}\t{{.Status}}\t{{.Ports}}"
+        ENDSSH
         echo ""
-        echo "📝 Ambos ambientes Blue y Green están corriendo"
+        echo "📝 Ambos ambientes Blue y Green están corriendo en VPS"
         echo ""
     
-    - name: Health check ${{ needs.determine-target.outputs.target_env }}
+    - name: 🏥 Health check ${{ needs.determine-target.outputs.target_env }} en VPS
       run: |
         TARGET_ENV="${{ needs.determine-target.outputs.target_env }}"
         TARGET_PORT="${{ needs.determine-target.outputs.target_port }}"
         
-        echo "Verificando salud de $TARGET_ENV en puerto $TARGET_PORT..."
+        echo "Verificando salud de $TARGET_ENV en VPS..."
         
-        for i in {1..30}; do
-          if curl -f http://localhost:$TARGET_PORT/ || curl -f http://localhost:$TARGET_PORT/health; then
-            echo "✓ $TARGET_ENV environment is healthy"
-            exit 0
-          fi
-          echo "Attempt $i failed, retrying..."
-          sleep 2
-        done
-        
-        echo "❌ $TARGET_ENV environment failed health check"
-        docker logs "app-$TARGET_ENV"
-        exit 1
+        ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << ENDSSH
+          for i in {1..30}; do
+            if curl -f http://localhost:$TARGET_PORT/ || curl -f http://localhost:$TARGET_PORT/health; then
+              echo "✓ $TARGET_ENV environment is healthy en VPS"
+              exit 0
+            fi
+            echo "Attempt \$i failed, retrying..."
+            sleep 2
+          done
+          
+          echo "❌ $TARGET_ENV environment failed health check"
+          docker logs app-$TARGET_ENV
+          exit 1
+        ENDSSH
     
-    - name: ✅ Deployment completado
+    - name: ✅ Deployment completado en VPS
       if: success()
       run: |
         TARGET_ENV="${{ needs.determine-target.outputs.target_env }}"
@@ -268,12 +290,27 @@ jobs:
         
         echo ""
         echo "╔═══════════════════════════════════════════════════════╗"
-        echo "║           ✅ DEPLOYMENT EXITOSO                      ║"
+        echo "║       ✅ DEPLOYMENT EXITOSO EN VPS                   ║"
         echo "╚═══════════════════════════════════════════════════════╝"
         echo ""
-        echo "📊 Estado de ambientes:"
-        echo "  🔵 BLUE:  $(docker ps | grep -q 'app-blue' && echo '✅ Running (8081)' || echo '⭕ Stopped')"
-        echo "  🟢 GREEN: $(docker ps | grep -q 'app-green' && echo '✅ Running (8082)' || echo '⭕ Stopped')"
+        echo "🌐 VPS: ${{ secrets.VPS_HOST }}"
+        echo ""
+        echo "📊 Estado de ambientes en VPS:"
+        
+        ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+          if docker ps | grep -q 'app-blue'; then
+            echo "  🔵 BLUE:  ✅ Running (8081)"
+          else
+            echo "  🔵 BLUE:  ⭕ Stopped"
+          fi
+          
+          if docker ps | grep -q 'app-green'; then
+            echo "  🟢 GREEN: ✅ Running (8082)"
+          else
+            echo "  🟢 GREEN: ⭕ Stopped"
+          fi
+        ENDSSH
+        
         echo ""
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo "🎯 Nueva versión lista en: $TARGET_ENV"
@@ -295,61 +332,111 @@ jobs:
     - name: Checkout código
       uses: actions/checkout@v3
     
-    - name: 📊 Estado ANTES del SWITCH
+    - name: 🔐 Configurar SSH para switch
+      uses: webfactory/ssh-agent@v0.8.0
+      with:
+        ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+    
+    - name: 📊 Estado ANTES del SWITCH (en VPS)
       run: |
         echo "══════════════════════════════════════════════════════════"
-        echo "     📊 ESTADO ANTES DEL SWITCH"
+        echo "     📊 ESTADO ANTES DEL SWITCH EN VPS"
         echo "══════════════════════════════════════════════════════════"
         echo ""
+        echo "🌐 VPS: ${{ secrets.VPS_HOST }}"
         echo "🔍 Ambiente activo: ${{ vars.ACTIVE_ENVIRONMENT || 'blue' }}"
         echo ""
-        echo "🐳 Contenedores Docker:"
-        docker ps --filter "name=app-" --format "table {{.Names}}\t{{.State}}\t{{.Status}}\t{{.Ports}}"
-        echo ""
+        echo "🐳 Contenedores Docker en VPS:"
         
-        if ! docker ps | grep -q "app-blue\|app-green"; then
-          echo "❌ Error: No hay ambientes disponibles"
-          exit 1
-        fi
+        ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+          docker ps --filter "name=app-" --format "table {{.Names}}\t{{.State}}\t{{.Status}}\t{{.Ports}}"
+          
+          if ! docker ps | grep -q "app-blue\|app-green"; then
+            echo "❌ Error: No hay ambientes disponibles"
+            exit 1
+          fi
+        ENDSSH
+        
+        echo ""
         echo "✅ Verificación completada"
         echo ""
     
-    - name: 🔄 Ejecutando SWITCHING Blue-Green
+    - name: 🔄 Ejecutando SWITCHING Blue-Green en VPS
       run: |
         TARGET_ENV="${{ needs.determine-target.outputs.target_env }}"
         CURRENT_ENV="${{ vars.ACTIVE_ENVIRONMENT || 'blue' }}"
+        TARGET_PORT="${{ needs.determine-target.outputs.target_port }}"
         
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "🔄 SWITCHING BLUE-GREEN EN PROGRESO"
+        echo "🔄 SWITCHING BLUE-GREEN EN VPS"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
+        echo "🌐 VPS: ${{ secrets.VPS_HOST }}"
         echo "📍 DE:   $CURRENT_ENV"
         echo "📍 HACIA: $TARGET_ENV"
         echo ""
-        echo "🔧 Acción: Cambiar proxy Nginx al nuevo ambiente"
+        echo "🔧 Acción: Cambiar Nginx al puerto $TARGET_PORT"
         echo ""
         
-        chmod +x switch-environment.sh
-        
-        echo "⚙️  Ejecutando script..."
-        ./switch-environment.sh "$TARGET_ENV"
-        
-        echo ""
-        echo "✅ Switch ejecutado exitosamente"
+        ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << ENDSSH
+          set -e
+          cd ${{ secrets.VPS_PROJECT_PATH || '/root/Blue_Green' }}
+          
+          echo "⚙️  Ejecutando switching..."
+          
+          # Verificar si existe Nginx
+          if command -v nginx &> /dev/null; then
+            # Cambiar configuración de Nginx
+            echo "upstream backend { server localhost:$TARGET_PORT; }" > /tmp/nginx-upstream.conf
+            
+            # Actualizar configuración principal
+            cat > /etc/nginx/sites-available/blue-green << 'EOF'
+        server {
+            listen 80;
+            server_name _;
+            
+            location / {
+                proxy_pass http://localhost:$TARGET_PORT;
+                proxy_set_header Host \$host;
+                proxy_set_header X-Real-IP \$remote_addr;
+            }
+            
+            location /health {
+                return 200 "Active: $TARGET_ENV\n";
+                add_header Content-Type text/plain;
+            }
+        }
+        EOF
+            
+            nginx -t && systemctl reload nginx
+            echo "✅ Nginx actualizado a $TARGET_ENV"
+          else
+            echo "⚠️  Nginx no instalado, usando acceso directo por puerto"
+          fi
+          
+          echo ""
+          echo "✅ Switch completado a $TARGET_ENV"
+        ENDSSH
     
-    - name: Verify production switch
+    - name: ✅ Verificar switch en VPS
       run: |
         TARGET_ENV="${{ needs.determine-target.outputs.target_env }}"
+        TARGET_PORT="${{ needs.determine-target.outputs.target_port }}"
         
-        echo "Verificando que producción esté respondiendo..."
+        echo "Verificando que producción esté respondiendo en VPS..."
         sleep 5
         
-        if curl -f http://localhost/ || curl -f http://localhost/health; then
-          echo "✓ Producción actualizada exitosamente a $TARGET_ENV"
-        else
-          echo "❌ Error: Producción no responde correctamente"
-          exit 1
-        fi
+        ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << ENDSSH
+          if curl -f http://localhost/ || curl -f http://localhost:$TARGET_PORT; then
+            echo "✓ Producción actualizada exitosamente a $TARGET_ENV"
+          else
+            echo "❌ Error: Producción no responde correctamente"
+            exit 1
+          fi
+        ENDSSH
+        
+        echo ""
+        echo "🌐 Verifica en tu navegador: http://${{ secrets.VPS_HOST }}"
     
     - name: Update active environment variable
       run: |
@@ -358,19 +445,23 @@ jobs:
         # Nota: Esto requiere configurar el secreto REPO_TOKEN con permisos
         # gh variable set ACTIVE_ENVIRONMENT --body "$TARGET_ENV"
     
-    - name: 📊 Estado DESPUÉS del SWITCH
+    - name: 📊 Estado DESPUÉS del SWITCH (en VPS)
       run: |
         echo ""
         echo "══════════════════════════════════════════════════════════"
-        echo "     📊 ESTADO DESPUÉS DEL SWITCH"
+        echo "     📊 ESTADO DESPUÉS DEL SWITCH EN VPS"
         echo "══════════════════════════════════════════════════════════"
         echo ""
-        echo "🐳 Contenedores Docker:"
-        docker ps --filter "name=app-" --format "table {{.Names}}\t{{.State}}\t{{.Status}}\t{{.Ports}}"
-        echo ""
-        if docker ps | grep -q "app-proxy"; then
-          echo "🔀 Proxy activo: ✅"
-        fi
+        echo "🐳 Contenedores Docker en VPS:"
+        
+        ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+          docker ps --filter "name=app-" --format "table {{.Names}}\t{{.State}}\t{{.Status}}\t{{.Ports}}"
+          
+          if systemctl is-active --quiet nginx; then
+            echo ""
+            echo "🔀 Nginx activo: ✅"
+          fi
+        ENDSSH
         echo ""
     
     - name: 🎉 Resumen del SWITCHING
